@@ -2,26 +2,22 @@
 #include "Arduino_FreeRTOS.h"
 #include "Adafruit_BMP280.h"
 #include "RF24.h"
-
-typedef struct
-{
-  int16_t sensor_id{0};
-  int16_t sensor_type{0};
-  int16_t value_1{0};
-  int16_t value_2{0};
-  int16_t value_3{0};
-  int16_t value_4{0};
-  int16_t value_5{0};
-} transmitted_data_t;
+#include "EEPROM.h"
+#include "ZHConfig.h"
 
 void sendSensorsValue(void *pvParameters);
 float getBatteryLevelCharge(void);
+void loadId(void);
+
+int16_t id{abs((int16_t)ID)};
 
 RF24 radio(9, 10);
 Adafruit_BMP280 bmp;
 
 void setup()
 {
+  loadId();
+
   ADCSRA &= ~(1 << ADEN);
   radio.begin();
   radio.setChannel(120);
@@ -56,14 +52,14 @@ void sendSensorsValue(void *pvParameters)
   (void)pvParameters;
   for (;;)
   {
-    transmitted_data_t sensor{abs((int16_t)ID), BMP280};
+    rf_transmitted_data_t sensor{id, RFST_BMP280};
     bmp.takeForcedMeasurement();
     sensor.value_1 = getBatteryLevelCharge() * 100;
     sensor.value_2 = bmp.readTemperature();
     sensor.value_3 = bmp.readPressure() * 0.00750062;
     radio.powerUp();
     radio.flush_tx();
-    radio.write(&sensor, sizeof(transmitted_data_t));
+    radio.write(&sensor, sizeof(rf_transmitted_data_t));
     radio.powerDown();
     vTaskDelay(300);
   }
@@ -79,6 +75,19 @@ float getBatteryLevelCharge()
   while (bit_is_set(ADCSRA, ADSC))
     ;
   ADCSRA &= ~(1 << ADEN);
-  float value = ((1024 * 1.1) / (ADCL + ADCH * 256));
-  return value;
+  return (1024 * 1.1) / (ADCL + ADCH * 256);
+}
+
+void loadId()
+{
+  cli();
+  if (EEPROM.read(511) == 254)
+    EEPROM.get(0, id);
+  else
+  {
+    EEPROM.write(511, 254);
+    EEPROM.put(0, id);
+  }
+  delay(50);
+  sei();
 }
